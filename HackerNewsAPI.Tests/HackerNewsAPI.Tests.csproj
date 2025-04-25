@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HackerNewsAPI.Core\HackerNewsAPI.Core.csproj" />
+    <ProjectReference Include="..\HackerNewsAPI\HackerNewsAPI.csproj" />
   </ItemGroup>
 
   <ItemGroup>

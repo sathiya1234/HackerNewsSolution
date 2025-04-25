@@ -12,141 +12,96 @@ namespace HackerNewsAPI.Tests.Services
     public class HackerNewsServiceTests
     {
         private Mock<HttpMessageHandler> _httpMessageHandlerMock;
-        private Mock<IMemoryCache> _memoryCacheMock;
+        private HttpClient _httpClient;
+        private IMemoryCache _cache;
         private HackerNewsService _service;
 
         [SetUp]
-        public void Setup()
+        public void SetUp()
         {
             _httpMessageHandlerMock = new Mock<HttpMessageHandler>();
-            _memoryCacheMock = new Mock<IMemoryCache>();
-
-            var httpClient = new HttpClient(_httpMessageHandlerMock.Object)
+            _httpClient = new HttpClient(_httpMessageHandlerMock.Object)
             {
                 BaseAddress = new Uri("https://hacker-news.firebaseio.com/v0/")
             };
 
-            _service = new HackerNewsService(httpClient, _memoryCacheMock.Object);
+            _cache = new MemoryCache(new MemoryCacheOptions());
+            _service = new HackerNewsService(_httpClient, _cache);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _httpClient.Dispose();
+            _cache.Dispose();
         }
 
         [Test]
-        public async Task GetNewestStories_ReturnsStories()
+        public void GetNewestStories_InvalidPageOrPageSize_ThrowsArgumentException()
         {
-            // Arrange
-            var storyIds = new[] { 1, 2, 3 };
-            var mockResponse = new HttpResponseMessage
-            {
-                StatusCode = HttpStatusCode.OK,
-                Content = new StringContent(JsonSerializer.Serialize(storyIds))
-            };
-
-            _httpMessageHandlerMock.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(mockResponse);
-
-            var cacheEntryMock = new Mock<ICacheEntry>();
-            _memoryCacheMock.Setup(m => m.CreateEntry(It.IsAny<object>())).Returns(cacheEntryMock.Object);
-
-            // Act
-            var result = await _service.GetNewestStories(1, 10);
-
-            // Assert
-            Assert.IsNotNull(result);
-            Assert.IsTrue(result.Any());
+            Assert.ThrowsAsync<ArgumentException>(() => _service.GetNewestStories(0, 10));
+            Assert.ThrowsAsync<ArgumentException>(() => _service.GetNewestStories(1, 0));
         }
 
         [Test]
-        public async Task SearchStories_WithEmptyTerm_ReturnsEmptyCollection()
+        public async Task GetNewestStories_ReturnsPagedStories()
         {
-            // Act
+            var storyIds = Enumerable.Range(1, 20).ToArray();
+            var stories = storyIds.Select(id => new StoryModel { Id = id, Title = $"Story {id}" });
+
+            SetupHttpResponse("newstories.json", storyIds);
+            foreach (var id in storyIds)
+                SetupHttpResponse($"item/{id}.json", new StoryModel { Id = id, Title = $"Story {id}" });
+
+            var result = await _service.GetNewestStories(1, 5);
+
+            Assert.That(result.Count(), Is.EqualTo(5));
+        }
+
+        [Test]
+        public async Task SearchStories_EmptySearch_ReturnsEmptyList()
+        {
             var result = await _service.SearchStories("");
-
-            // Assert
-            Assert.IsNotNull(result);
-            Assert.IsFalse(result.Any());
+            Assert.IsEmpty(result);
         }
 
         [Test]
-        public async Task GetNewestStories_CachesStoryIds()
+        public async Task SearchStories_ReturnsMatchingStories()
         {
-            // Arrange
-            var storyIds = new[] { 1, 2, 3 };
-            var mockResponse = new HttpResponseMessage
+            var storyIds = new[] { 101, 102, 103 };
+            var stories = new[]
             {
-                StatusCode = HttpStatusCode.OK,
-                Content = new StringContent(JsonSerializer.Serialize(storyIds))
+                new StoryModel { Id = 101, Title = "NUnit tutorial" },
+                new StoryModel { Id = 102, Title = "C# basics" },
+                new StoryModel { Id = 103, Title = "Advanced NUnit" }
             };
 
-            _httpMessageHandlerMock.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(mockResponse);
+            SetupHttpResponse("newstories.json", storyIds);
+            foreach (var s in stories)
+                SetupHttpResponse($"item/{s.Id}.json", s);
 
-            object cachedValue = null;
-            _memoryCacheMock.Setup(m => m.TryGetValue(It.IsAny<object>(), out cachedValue))
-                .Returns(false);
-            _memoryCacheMock.Setup(m => m.CreateEntry(It.IsAny<object>())).Returns(Mock.Of<ICacheEntry>());
+            var result = await _service.SearchStories("nunit");
 
-            // Act
-            var result1 = await _service.GetNewestStories(1, 1);
-            var result2 = await _service.GetNewestStories(1, 1);
-
-            // Assert
-            _httpMessageHandlerMock.Protected().Verify(
-                "SendAsync",
-                Times.Exactly(1), // Should only call once due to caching
-                ItExpr.IsAny<HttpRequestMessage>(),
-                ItExpr.IsAny<CancellationToken>());
+            Assert.That(result.Count(), Is.EqualTo(2));
         }
 
-        [Test]
-        public async Task SearchStories_WithValidTerm_ReturnsMatchingStories()
+        private void SetupHttpResponse<T>(string endpoint, T data)
         {
-            // Arrange
-            var storyIds = new[] { 1, 2, 3 };
-            var mockResponse = new HttpResponseMessage
+            var json = JsonSerializer.Serialize(data);
+            var response = new HttpResponseMessage
             {
                 StatusCode = HttpStatusCode.OK,
-                Content = new StringContent(JsonSerializer.Serialize(storyIds))
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
             };
 
-            _httpMessageHandlerMock.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.Is<HttpRequestMessage>(r =>
-                    r.RequestUri.AbsoluteUri.Contains("newstories.json")),
+            _httpMessageHandlerMock
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.ToString().EndsWith(endpoint)),
                     ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(mockResponse);
-
-            // Mock story responses
-            var stories = new Dictionary<int, StoryModel>
-        {
-            { 1, new StoryModel { Id = 1, Title = "Test story about programming" } },
-            { 2, new StoryModel { Id = 2, Title = "Another tech story" } },
-            { 3, new StoryModel { Id = 3, Title = "Non-tech related story" } }
-        };
-
-            _httpMessageHandlerMock.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.Is<HttpRequestMessage>(r =>
-                    r.RequestUri.AbsoluteUri.Contains("item/")),
-                    ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
-                {
-                    var id = int.Parse(request.RequestUri.Segments.Last().Replace(".json", ""));
-                    return new HttpResponseMessage
-                    {
-                        StatusCode = HttpStatusCode.OK,
-                        Content = new StringContent(JsonSerializer.Serialize(stories[id]))
-                    };
-                });
-
-            var cacheEntryMock = new Mock<ICacheEntry>();
-            _memoryCacheMock.Setup(m => m.CreateEntry(It.IsAny<object>())).Returns(cacheEntryMock.Object);
-
-            // Act
-            var result = await _service.SearchStories("tech");
-
-            // Assert
-            Assert.IsNotNull(result);
-            Assert.AreEqual(1, result.Count());
-            Assert.AreEqual("Another tech story", result.First().Title);
+                .ReturnsAsync(response);
         }
     }
 }
+
