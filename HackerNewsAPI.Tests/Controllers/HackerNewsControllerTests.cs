@@ -10,71 +10,94 @@ namespace HackerNewsAPI.Tests.Controllers
     [TestFixture]
     public class HackerNewsControllerTests
     {
-        private Mock<IHackerNewsService> _mockService;
+        private Mock<IHackerNewsService> _mockHackerNewsService;
         private HackerNewsController _controller;
 
         [SetUp]
-        public void SetUp()
+        public void Setup()
         {
-            _mockService = new Mock<IHackerNewsService>();
-            _controller = new HackerNewsController(_mockService.Object);
+            _mockHackerNewsService = new Mock<IHackerNewsService>();
+            _controller = new HackerNewsController(_mockHackerNewsService.Object);
         }
 
         [Test]
-        public async Task GetNewestStories_ReturnsOkWithStories()
+        public async Task GetNewestStories_ReturnsBadRequest_WhenInvalidPageOrPageSize()
         {
             // Arrange
-            var sampleStories = new List<StoryModel>
-            {
-                new StoryModel { Id = 1, Title = "Test Story 1" },
-                new StoryModel { Id = 2, Title = "Test Story 2" }
-            };
-
-            _mockService.Setup(s => s.GetNewestStories(1, 2))
-                        .ReturnsAsync(sampleStories);
+            int invalidPage = 0;
+            int invalidPageSize = 0;
 
             // Act
-            var result = await _controller.GetNewestStories(1, 2);
-
-            // Assert
-            Assert.IsInstanceOf<OkObjectResult>(result.Result);
-            var okResult = result.Result as OkObjectResult;
-            Assert.That(okResult!.Value, Is.EqualTo(sampleStories));
-        }
-
-        [Test]
-        public async Task SearchStories_ValidTerm_ReturnsOkWithMatchingStories()
-        {
-            // Arrange
-            var term = "Angular";
-            var expected = new List<StoryModel>
-            {
-                new StoryModel { Id = 3, Title = "Angular 18 Released" }
-            };
-
-            _mockService.Setup(s => s.SearchStories(term)).ReturnsAsync(expected);
-
-            // Act
-            var result = await _controller.SearchStories(term);
-
-            // Assert
-            Assert.IsInstanceOf<OkObjectResult>(result.Result);
-            var okResult = result.Result as OkObjectResult;
-            Assert.That(okResult!.Value, Is.EqualTo(expected));
-        }
-
-        [TestCase(null)]
-        [TestCase("")]
-        [TestCase("  ")]
-        public async Task SearchStories_InvalidTerm_ReturnsBadRequest(string? term)
-        {
-            // Act
-            var result = await _controller.SearchStories(term);
+            var result = await _controller.GetNewestStories(invalidPage, invalidPageSize);
 
             // Assert
             Assert.IsInstanceOf<BadRequestObjectResult>(result.Result);
-            var badRequest = result.Result as BadRequestObjectResult;
-            Assert.That(badRequest!.Value, Is.EqualTo("Search term is required"));
+            var badRequest = (BadRequestObjectResult)result.Result;
+            Assert.AreEqual("Page and pageSize must be greater than 0.", badRequest.Value);
+        }
+
+        [Test]
+        public async Task GetNewestStories_ReturnsOkResult_WithStoryModel()
+        {
+            // Arrange
+            var expectedModel = new StoryModel
+            {
+                Stories = new List<Story> { new Story { Id = 1, Title = "Test Story", Url = "http://example.com" } },
+                TotalCount = 1
+            };
+
+            _mockHackerNewsService
+                .Setup(service => service.GetNewestStories(It.IsAny<int>(), It.IsAny<int>()))
+                .ReturnsAsync(expectedModel);
+
+            // Act
+            var result = await _controller.GetNewestStories(1, 10);
+
+            // Assert
+            Assert.IsInstanceOf<OkObjectResult>(result.Result);
+            var okResult = (OkObjectResult)result.Result;
+            var model = okResult.Value as StoryModel;
+            Assert.IsNotNull(model);
+            Assert.AreEqual(expectedModel.TotalCount, model.TotalCount);
+        }
+
+        [Test]
+        public async Task SearchStories_ReturnsBadRequest_WhenTermIsEmpty()
+        {
+            // Arrange
+            string emptyTerm = " ";
+
+            // Act
+            var result = await _controller.SearchStories(emptyTerm);
+
+            // Assert
+            Assert.IsInstanceOf<BadRequestObjectResult>(result.Result);
+            var badRequest = (BadRequestObjectResult)result.Result;
+            Assert.AreEqual("Search term is required.", badRequest.Value);
+        }
+
+        [Test]
+        public async Task SearchStories_ReturnsOkResult_WithStories()
+        {
+            // Arrange
+            var expectedStories = new List<Story>
+            {
+                new Story { Id = 1, Title = "Test Search Story", Url = "http://example.com" }
+            };
+
+            _mockHackerNewsService
+                .Setup(service => service.SearchStories(It.IsAny<string>()))
+                .ReturnsAsync(expectedStories);
+
+            // Act
+            var result = await _controller.SearchStories("test");
+
+            // Assert
+            Assert.IsInstanceOf<OkObjectResult>(result.Result);
+            var okResult = (OkObjectResult)result.Result;
+            var stories = okResult.Value as IEnumerable<Story>;
+            Assert.IsNotNull(stories);
+            Assert.AreEqual(1, ((List<Story>)stories).Count);
         }
     }
 }

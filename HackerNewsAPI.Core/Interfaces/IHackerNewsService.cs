@@ -3,27 +3,23 @@
 namespace HackerNewsAPI.Core.Interfaces
 {
     /// <summary>
-    /// Provides methods to interact with the Hacker News API
+    /// Defines methods for interacting with Hacker News stories.
     /// </summary>
     public interface IHackerNewsService
     {
         /// <summary>
-        /// Retrieves the newest stories from Hacker News with pagination support
+        /// Retrieves a paginated list of the newest stories from Hacker News.
         /// </summary>
-        /// <param name="page">The page number to retrieve (1-based index)</param>
-        /// <param name="pageSize">The number of stories per page</param>
-        /// <returns>A list of stories for the requested page</returns>
-        /// <exception cref="ArgumentOutOfRangeException">Thrown when page or pageSize is less than 1</exception>
-        /// <exception cref="HttpRequestException">Thrown when the API request fails</exception>
-        Task<IEnumerable<StoryModel>> GetNewestStories(int page, int pageSize);
+        /// <param name="page">The page number to retrieve (starting from 1).</param>
+        /// <param name="pageSize">The number of stories per page.</param>
+        /// <returns>A <see cref="StoryModel"/> containing the stories and total count.</returns>
+        Task<StoryModel> GetNewestStories(int page, int pageSize);
 
         /// <summary>
-        /// Searches stories by matching the search term against story titles
+        /// Searches stories by a specified search term in their titles.
         /// </summary>
-        /// <param name="searchTerm">The term to search for in story titles</param>
-        /// <returns>A list of stories containing the search term in their title</returns>
-        /// <exception cref="ArgumentException">Thrown when searchTerm is null or whitespace</exception>
-        /// <exception cref="HttpRequestException">Thrown when the API request fails</exception>
-        Task<IEnumerable<StoryModel>> SearchStories(string searchTerm);
+        /// <param name="searchTerm">The keyword or phrase to search for in story titles.</param>
+        /// <returns>A collection of <see cref="Story"/> objects that match the search term.</returns>
+        Task<IEnumerable<Story>> SearchStories(string searchTerm);
     }
 }

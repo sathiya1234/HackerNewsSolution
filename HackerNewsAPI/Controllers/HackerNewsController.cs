@@ -5,8 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace HackerNewsAPI.Controllers
 {
     /// <summary>
-    /// API controller for interacting with Hacker News stories.
-    /// Provides endpoints to retrieve the newest stories and perform search operations.
+    /// API controller for retrieving and searching Hacker News stories.
     /// </summary>
     [Route("api/[controller]/[action]")]
     [ApiController]
@@ -17,7 +16,7 @@ namespace HackerNewsAPI.Controllers
         /// <summary>
         /// Initializes a new instance of the <see cref="HackerNewsController"/> class.
         /// </summary>
-        /// <param name="hackerNewsService">Service used to fetch and manage Hacker News stories.</param>
+        /// <param name="hackerNewsService">Service to interact with Hacker News data.</param>
         public HackerNewsController(IHackerNewsService hackerNewsService)
         {
             _hackerNewsService = hackerNewsService;
@@ -26,31 +25,32 @@ namespace HackerNewsAPI.Controllers
         /// <summary>
         /// Retrieves the newest Hacker News stories with pagination support.
         /// </summary>
-        /// <param name="page">Page number (1-based).</param>
-        /// <param name="pageSize">Number of stories to include per page.</param>
-        /// <returns>List of the newest stories for the requested page.</returns>
-        /// <response code="200">Returns the list of stories.</response>
-        /// <response code="400">If the input parameters are invalid.</response>
+        /// <param name="page">The page number to retrieve (1-based index).</param>
+        /// <param name="pageSize">The number of stories to include per page.</param>
+        /// <returns>An <see cref="ActionResult{TValue}"/> containing a <see cref="StoryModel"/> with the list of stories and total count.</returns>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<StoryModel>>> GetNewestStories(int page, int pageSize)
+        public async Task<ActionResult<StoryModel>> GetNewestStories(int page, int pageSize)
         {
-            var stories = await _hackerNewsService.GetNewestStories(page, pageSize);
-            return Ok(stories);
+            if (page < 1 || pageSize < 1)
+            {
+                return BadRequest("Page and pageSize must be greater than 0.");
+            }
+
+            var storyModel = await _hackerNewsService.GetNewestStories(page, pageSize);
+            return Ok(storyModel);
         }
 
         /// <summary>
-        /// Searches Hacker News stories by a term in the title.
+        /// Searches Hacker News stories by a term in their titles.
         /// </summary>
-        /// <param name="term">Search term to look for in story titles.</param>
-        /// <returns>List of stories containing the search term in their title.</returns>
-        /// <response code="200">Returns the list of matching stories.</response>
-        /// <response code="400">If the search term is null or empty.</response>
+        /// <param name="term">The search term to find in story titles.</param>
+        /// <returns>An <see cref="ActionResult{TValue}"/> containing a collection of matching <see cref="Story"/> objects.</returns>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<StoryModel>>> SearchStories(string term)
+        public async Task<ActionResult<IEnumerable<Story>>> SearchStories(string term)
         {
             if (string.IsNullOrWhiteSpace(term))
             {
-                return BadRequest("Search term is required");
+                return BadRequest("Search term is required.");
             }
 
             var stories = await _hackerNewsService.SearchStories(term);
