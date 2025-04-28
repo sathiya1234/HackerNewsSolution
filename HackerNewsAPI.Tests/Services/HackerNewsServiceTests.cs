@@ -3,7 +3,6 @@ using HackerNewsAPI.Core.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Moq;
 using Moq.Contrib.HttpClient;
-using System.Net;
 using System.Text.Json;
 
 namespace HackerNewsAPI.Tests.Services
