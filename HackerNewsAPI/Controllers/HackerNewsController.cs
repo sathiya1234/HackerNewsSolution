@@ -13,48 +13,34 @@ namespace HackerNewsAPI.Controllers
     {
         private readonly IHackerNewsService _hackerNewsService;
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="HackerNewsController"/> class.
-        /// </summary>
-        /// <param name="hackerNewsService">Service to interact with Hacker News data.</param>
         public HackerNewsController(IHackerNewsService hackerNewsService)
         {
             _hackerNewsService = hackerNewsService;
         }
 
         /// <summary>
-        /// Retrieves the newest Hacker News stories with pagination support.
+        /// Retrieves paginated newest stories with optional search filtering
         /// </summary>
-        /// <param name="page">The page number to retrieve (1-based index).</param>
-        /// <param name="pageSize">The number of stories to include per page.</param>
-        /// <returns>An <see cref="ActionResult{TValue}"/> containing a <see cref="StoryModel"/> with the list of stories and total count.</returns>
+        /// <param name="page">Page number (1-based)</param>
+        /// <param name="pageSize">Items per page</param>
+        /// <param name="searchTerm">Optional title search term</param>
+        /// <returns>Paginated story results</returns>
         [HttpGet]
-        public async Task<ActionResult<StoryModel>> GetNewestStories(int page, int pageSize)
+        public async Task<ActionResult<StoryModel>> GetNewestStories(int page = 1, int pageSize = 10, [FromQuery] string? searchTerm = null)
         {
-            if (page < 1 || pageSize < 1)
+            try
             {
-                return BadRequest("Page and pageSize must be greater than 0.");
+                if (page < 1 || pageSize < 1)
+                    return BadRequest("Page and pageSize must be greater than 0");
+
+                var result = await _hackerNewsService.GetNewestStories(page, pageSize, searchTerm);
+                return Ok(result);
             }
-
-            var storyModel = await _hackerNewsService.GetNewestStories(page, pageSize);
-            return Ok(storyModel);
-        }
-
-        /// <summary>
-        /// Searches Hacker News stories by a term in their titles.
-        /// </summary>
-        /// <param name="term">The search term to find in story titles.</param>
-        /// <returns>An <see cref="ActionResult{TValue}"/> containing a collection of matching <see cref="Story"/> objects.</returns>
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Story>>> SearchStories(string term)
-        {
-            if (string.IsNullOrWhiteSpace(term))
+            catch (Exception ex)
             {
-                return BadRequest("Search term is required.");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
-
-            var stories = await _hackerNewsService.SearchStories(term);
-            return Ok(stories);
         }
     }
 }
+

@@ -5,8 +5,9 @@ using System.Net.Http.Json;
 
 namespace HackerNewsAPI.Core.Services
 {
+
     /// <summary>
-    /// Service to interact with Hacker News API for fetching and searching stories.
+    /// Service implementation for Hacker News API operations
     /// </summary>
     public class HackerNewsService : IHackerNewsService
     {
@@ -19,10 +20,10 @@ namespace HackerNewsAPI.Core.Services
         private const int MaxConcurrentRequests = 10;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="HackerNewsService"/> class.
+        /// Initializes a new instance of the Hacker News service
         /// </summary>
-        /// <param name="httpClient">HTTP client to interact with the Hacker News API.</param>
-        /// <param name="cache">Memory cache for storing fetched stories and IDs.</param>
+        /// <param name="httpClient">Configured HttpClient</param>
+        /// <param name="cache">Memory cache instance</param>
         public HackerNewsService(HttpClient httpClient, IMemoryCache cache)
         {
             _httpClient = httpClient;
@@ -30,67 +31,37 @@ namespace HackerNewsAPI.Core.Services
             _cache = cache;
         }
 
-        /// <summary>
-        /// Retrieves a paginated list of the newest stories from Hacker News.
-        /// </summary>
-        /// <param name="page">Page number (starting from 1).</param>
-        /// <param name="pageSize">Number of stories per page.</param>
-        /// <returns>A <see cref="StoryModel"/> containing a list of stories and total count.</returns>
-        public async Task<StoryModel> GetNewestStories(int page, int pageSize)
-        {
-            if (page < 1 || pageSize < 1)
-                throw new ArgumentException("Page and pageSize must be positive integers");
-
-            return await GetProcessedStoriesAsync(page, pageSize);
-        }
-
-        /// <summary>
-        /// Searches stories containing the specified search term in their title.
-        /// </summary>
-        /// <param name="searchTerm">The keyword to search for in story titles.</param>
-        /// <returns>A collection of matching <see cref="Story"/> objects.</returns>
-        public async Task<IEnumerable<Story>> SearchStories(string searchTerm)
-        {
-            if (string.IsNullOrWhiteSpace(searchTerm))
-                return Enumerable.Empty<Story>();
-
-            var storiesModel = await GetProcessedStoriesAsync(searchTerm: searchTerm);
-            return storiesModel.Stories;
-        }
-
-        /// <summary>
-        /// Fetches, filters, paginates, and returns a set of stories.
-        /// </summary>
-        /// <param name="page">Optional page number for pagination.</param>
-        /// <param name="pageSize">Optional page size for pagination.</param>
-        /// <param name="searchTerm">Optional search term for filtering stories by title.</param>
-        /// <returns>A <see cref="StoryModel"/> containing the processed stories.</returns>
-        private async Task<StoryModel> GetProcessedStoriesAsync(int? page = null, int? pageSize = null, string? searchTerm = null)
+        /// <inheritdoc/>
+        public async Task<StoryModel> GetNewestStories(int page, int pageSize, string? searchTerm = null)
         {
             var storyIds = await GetCachedStoryIdsAsync();
-
             var allStories = await GetStoriesAsync(storyIds);
 
-            if (!string.IsNullOrWhiteSpace(searchTerm))
-            {
-                var lowerSearch = searchTerm.ToLower();
-                allStories = allStories.Where(s => s.Title.ToLower().Contains(lowerSearch)).ToList();
-            }
+            var filtered = FilterStories(allStories, searchTerm);
 
-            var totalCount = allStories.Count;
+            return PaginateResults(filtered, page, pageSize);
+        }
 
-            if (page.HasValue && pageSize.HasValue)
-            {
-                allStories = allStories
-                    .Skip((page.Value - 1) * pageSize.Value)
-                    .Take(pageSize.Value)
-                    .ToList();
-            }
+        private List<Story> FilterStories(List<Story> stories, string? searchTerm)
+        {
+            if (string.IsNullOrWhiteSpace(searchTerm))
+                return stories;
+
+            var lowerTerm = searchTerm.ToLower();
+            return stories.Where(s => s.Title.ToLower().Contains(lowerTerm)).ToList();
+        }
+
+        private StoryModel PaginateResults(List<Story> stories, int page, int pageSize)
+        {
+            var paginated = stories
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
 
             return new StoryModel
             {
-                Stories = allStories,
-                TotalCount = totalCount
+                Stories = paginated,
+                TotalCount = stories.Count
             };
         }
 

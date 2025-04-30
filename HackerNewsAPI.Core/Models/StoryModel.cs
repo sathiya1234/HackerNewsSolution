@@ -1,39 +1,44 @@
 ﻿namespace HackerNewsAPI.Core.Models
 {
     /// <summary>
-    /// Represents a collection of stories along with the total count.
+    /// Represents a paginated story result set
     /// </summary>
     public class StoryModel
     {
         /// <summary>
-        /// Gets or sets the list of stories.
+        /// Current page of stories
         /// </summary>
+        /// <example>[{ "id": 123, "title": "Sample Story", "url": "https://example.com" }]</example>
         public List<Story> Stories { get; set; } = new List<Story>();
 
         /// <summary>
-        /// Gets or sets the total count of stories.
+        /// Total number of stories available (before pagination)
         /// </summary>
-        public int TotalCount { get; set; } = 0;
+        /// <example>150</example>
+        public int TotalCount { get; set; }
     }
 
     /// <summary>
-    /// Represents an individual story from Hacker News.
+    /// Represents a Hacker News story
     /// </summary>
     public class Story
     {
         /// <summary>
-        /// Gets or sets the unique identifier of the story.
+        /// Unique story identifier
         /// </summary>
-        public int Id { get; set; } = 0;
+        /// <example>12345</example>
+        public int Id { get; set; }
 
         /// <summary>
-        /// Gets or sets the title of the story.
+        /// Story title
         /// </summary>
+        /// <example>Breaking News in Technology</example>
         public string Title { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the URL of the story (optional).
+        /// Optional URL to full story
         /// </summary>
+        /// <example>https://example.com/news</example>
         public string Url { get; set; } = string.Empty;
     }
 }
