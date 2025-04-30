@@ -35,10 +35,10 @@ namespace HackerNewsAPI.Core.Services
         public async Task<StoryModel> GetNewestStories(int page, int pageSize, string? searchTerm = null)
         {
             var storyIds = await GetCachedStoryIdsAsync();
-            var allStories = await GetStoriesAsync(storyIds);
-
+            // Enforce the maximum of 200 stories
+            var limitedStoryIds = storyIds.Take(200);
+            var allStories = await GetStoriesAsync(limitedStoryIds);
             var filtered = FilterStories(allStories, searchTerm);
-
             return PaginateResults(filtered, page, pageSize);
         }
 
@@ -53,10 +53,7 @@ namespace HackerNewsAPI.Core.Services
 
         private StoryModel PaginateResults(List<Story> stories, int page, int pageSize)
         {
-            var paginated = stories
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
+            var paginated = stories.Skip((page - 1) * pageSize).Take(pageSize).ToList();
 
             return new StoryModel
             {
