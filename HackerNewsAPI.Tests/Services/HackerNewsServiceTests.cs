@@ -2,8 +2,11 @@
 using HackerNewsAPI.Core.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Moq;
-using Moq.Contrib.HttpClient;
-using System.Text.Json;
+using Moq.Protected;
+using System.Net;
+using System.Net.Http.Json;
+using NUnit.Framework;
+using System.Linq;
 
 namespace HackerNewsAPI.Tests.Services
 {
@@ -11,142 +14,162 @@ namespace HackerNewsAPI.Tests.Services
     public class HackerNewsServiceTests
     {
         private HackerNewsService _service;
-        private Mock<IMemoryCache> _memoryCacheMock;
+        private Mock<IMemoryCache> _cacheMock;
+        private Mock<HttpMessageHandler> _httpHandlerMock;
+        private MemoryCache _realCache;
         private HttpClient _httpClient;
-        private Mock<HttpMessageHandler> _httpMessageHandlerMock;
-        private Mock<ICacheEntry> _cacheEntryMock;
 
         [SetUp]
         public void Setup()
         {
-            _memoryCacheMock = new Mock<IMemoryCache>();
-            _cacheEntryMock = new Mock<ICacheEntry>();
-            _cacheEntryMock.SetupAllProperties();
-            _httpMessageHandlerMock = new Mock<HttpMessageHandler>(MockBehavior.Loose);
+            _realCache = new MemoryCache(new MemoryCacheOptions());
+            _cacheMock = new Mock<IMemoryCache>();
+            _httpHandlerMock = new Mock<HttpMessageHandler>(MockBehavior.Strict);
 
-            _httpClient = new HttpClient(_httpMessageHandlerMock.Object)
+            // Allow HttpMessageHandler.Dispose to be called without errors
+            _httpHandlerMock.Protected()
+                .Setup("Dispose", ItExpr.IsAny<bool>());
+
+            _httpClient = new HttpClient(_httpHandlerMock.Object)
             {
                 BaseAddress = new Uri("https://hacker-news.firebaseio.com/v0/")
             };
-
-            _service = new HackerNewsService(_httpClient, _memoryCacheMock.Object);
-
-            _memoryCacheMock
-                .Setup(m => m.CreateEntry(It.IsAny<object>()))
-                .Returns(_cacheEntryMock.Object);
         }
 
         [TearDown]
         public void TearDown()
         {
+            _realCache?.Dispose();
             _httpClient?.Dispose();
         }
 
-        [Test]
-        public void GetNewestStories_InvalidPageOrPageSize_ThrowsArgumentException()
+        private void SetupHttpClientWithResponse<T>(string url, T content)
         {
-            // Act & Assert
-            Assert.ThrowsAsync<ArgumentException>(() => _service.GetNewestStories(0, 10));
-            Assert.ThrowsAsync<ArgumentException>(() => _service.GetNewestStories(1, 0));
+            _httpHandlerMock
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.Is<HttpRequestMessage>(m => m.RequestUri.ToString().Contains(url)),
+                    ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = JsonContent.Create(content)
+                });
+
+            _httpClient = new HttpClient(_httpHandlerMock.Object)
+            {
+                BaseAddress = new Uri("https://hacker-news.firebaseio.com/v0/")
+            };
         }
 
         [Test]
-        public async Task SearchStories_EmptySearchTerm_ReturnsEmptyList()
+        public async Task GetNewestStories_ReturnsPaginatedResults()
         {
+            // Arrange
+            var storyIds = Enumerable.Range(1, 5).ToArray();
+            var stories = storyIds.Select(id => new Story
+            {
+                Id = id,
+                Title = $"Title {id}",
+                Url = $"https://story{id}.com"
+            }).ToList();
+
+            SetupHttpClientWithResponse("newstories.json", storyIds);
+            foreach (var story in stories)
+            {
+                SetupHttpClientWithResponse($"item/{story.Id}.json", story);
+            }
+
+            _service = new HackerNewsService(_httpClient, _realCache);
+
             // Act
-            var result = await _service.SearchStories("");
+            var result = await _service.GetNewestStories(page: 1, pageSize: 2, searchTerm: "Title");
 
             // Assert
-            Assert.IsNotNull(result);
-            Assert.IsEmpty(result);
+            Assert.That(result.TotalCount, Is.EqualTo(5));
+            Assert.That(result.Stories.Count, Is.EqualTo(2));
         }
 
         [Test]
-        public async Task GetNewestStories_ValidRequest_ReturnsStories()
+        public async Task GetNewestStories_ReturnsFilteredResults()
         {
             // Arrange
             var storyIds = new[] { 1, 2, 3 };
-
-            SetupMemoryCache(HackerNewsServiceTestHelper.NewStoriesCacheKey, storyIds);
-            SetupHttpClientGet("newstories.json", storyIds);
-
             var stories = new List<Story>
             {
-                new Story { Id = 1, Title = "Story One" },
-                new Story { Id = 2, Title = "Story Two" },
-                new Story { Id = 3, Title = "Story Three" }
+                new Story { Id = 1, Title = "C# advanced tips" },
+                new Story { Id = 2, Title = "Java basics" },
+                new Story { Id = 3, Title = "C# testing strategies" }
             };
 
+            SetupHttpClientWithResponse("newstories.json", storyIds);
             foreach (var story in stories)
             {
-                SetupHttpClientGet($"item/{story.Id}.json", story);
+                SetupHttpClientWithResponse($"item/{story.Id}.json", story);
             }
 
+            _service = new HackerNewsService(_httpClient, _realCache);
+
             // Act
-            var result = await _service.GetNewestStories(1, 2);
+            var result = await _service.GetNewestStories(1, 10, "C#");
 
             // Assert
-            Assert.IsNotNull(result);
-            Assert.That(result.Stories.Count, Is.EqualTo(2));
-            Assert.That(result.TotalCount, Is.EqualTo(3));
+            Assert.That(result.TotalCount, Is.EqualTo(2));
+            Assert.That(result.Stories.All(s => s.Title.Contains("C#")));
         }
 
         [Test]
-        public async Task SearchStories_WithValidSearchTerm_ReturnsFilteredStories()
+        public async Task GetNewestStories_AppliesMaxLimitOf200()
+        {
+            // Arrange
+            var storyIds = Enumerable.Range(1, 300).ToArray();
+            var stories = storyIds.Take(200).Select(id => new Story
+            {
+                Id = id,
+                Title = $"Story {id}"
+            }).ToList();
+
+            SetupHttpClientWithResponse("newstories.json", storyIds);
+            foreach (var story in stories)
+            {
+                SetupHttpClientWithResponse($"item/{story.Id}.json", story);
+            }
+
+            _service = new HackerNewsService(_httpClient, _realCache);
+
+            // Act
+            var result = await _service.GetNewestStories(1, 20);
+
+            // Assert
+            Assert.That(result.TotalCount, Is.EqualTo(200));
+            Assert.That(result.Stories.Count, Is.EqualTo(20));
+        }
+
+        [Test]
+        public async Task GetNewestStories_ReturnsAll_WhenSearchTermIsEmpty()
         {
             // Arrange
             var storyIds = new[] { 1, 2 };
-
-            SetupMemoryCache(HackerNewsServiceTestHelper.NewStoriesCacheKey, storyIds);
-            SetupHttpClientGet("newstories.json", storyIds);
-
             var stories = new List<Story>
             {
-                new Story { Id = 1, Title = "Angular is awesome" },
-                new Story { Id = 2, Title = "Learning NUnit" }
+                new Story { Id = 1, Title = "Test 1" },
+                new Story { Id = 2, Title = "Test 2" }
             };
 
+            SetupHttpClientWithResponse("newstories.json", storyIds);
             foreach (var story in stories)
             {
-                SetupHttpClientGet($"item/{story.Id}.json", story);
+                SetupHttpClientWithResponse($"item/{story.Id}.json", story);
             }
 
+            _service = new HackerNewsService(_httpClient, _realCache);
+
             // Act
-            var result = await _service.SearchStories("Angular");
+            var result = await _service.GetNewestStories(1, 10, "");
 
             // Assert
-            Assert.IsNotNull(result);
-            Assert.That(result.Count(), Is.EqualTo(1));
-            Assert.That(result.First().Title, Is.EqualTo("Angular is awesome"));
+            Assert.That(result.TotalCount, Is.EqualTo(2));
         }
-
-        // --- Helpers ---
-
-        private void SetupMemoryCache<T>(string key, T value)
-        {
-            object temp = value;
-
-            _memoryCacheMock
-                .Setup(m => m.TryGetValue(key, out temp))
-                .Returns(true); // simulate cache hit
-
-            _memoryCacheMock
-                .Setup(m => m.CreateEntry(It.IsAny<object>()))
-                .Returns(_cacheEntryMock.Object);
-        }
-
-        private void SetupHttpClientGet<T>(string url, T content)
-        {
-            _httpMessageHandlerMock
-                .SetupRequest(HttpMethod.Get, new Uri(_httpClient.BaseAddress, url))
-                .ReturnsResponse(JsonSerializer.Serialize(content), "application/json");
-        }
-    }
-
-    internal static class HackerNewsServiceTestHelper
-    {
-        public const string NewStoriesCacheKey = "NewStories";
     }
 }
-
-

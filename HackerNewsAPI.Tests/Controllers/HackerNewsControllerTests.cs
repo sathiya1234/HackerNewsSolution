@@ -2,6 +2,7 @@
 using HackerNewsAPI.Core.Interfaces;
 using HackerNewsAPI.Core.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace HackerNewsAPI.Tests.Controllers
@@ -10,94 +11,116 @@ namespace HackerNewsAPI.Tests.Controllers
     [TestFixture]
     public class HackerNewsControllerTests
     {
-        private Mock<IHackerNewsService> _mockHackerNewsService;
+        private Mock<IHackerNewsService> _mockService;
+        private Mock<ILogger<HackerNewsController>> _mockLogger;
         private HackerNewsController _controller;
 
         [SetUp]
         public void Setup()
         {
-            _mockHackerNewsService = new Mock<IHackerNewsService>();
-            _controller = new HackerNewsController(_mockHackerNewsService.Object);
+            _mockService = new Mock<IHackerNewsService>();
+            _mockLogger = new Mock<ILogger<HackerNewsController>>();
+            _controller = new HackerNewsController(_mockService.Object, _mockLogger.Object);
         }
 
         [Test]
-        public async Task GetNewestStories_ReturnsBadRequest_WhenInvalidPageOrPageSize()
+        public async Task GetNewestStories_InvalidPageOrPageSize_ReturnsBadRequest()
         {
-            // Arrange
-            int invalidPage = 0;
-            int invalidPageSize = 0;
-
             // Act
-            var result = await _controller.GetNewestStories(invalidPage, invalidPageSize);
+            var result = await _controller.GetNewestStories(0, 10);
 
             // Assert
-            Assert.IsInstanceOf<BadRequestObjectResult>(result.Result);
-            var badRequest = (BadRequestObjectResult)result.Result;
-            Assert.AreEqual("Page and pageSize must be greater than 0.", badRequest.Value);
+            var badRequestResult = result.Result as BadRequestObjectResult;
+            Assert.IsNotNull(badRequestResult);
+            Assert.AreEqual(400, badRequestResult.StatusCode);
         }
 
         [Test]
-        public async Task GetNewestStories_ReturnsOkResult_WithStoryModel()
+        public async Task GetNewestStories_NoStoriesFound_ReturnsNotFound()
         {
             // Arrange
-            var expectedModel = new StoryModel
-            {
-                Stories = new List<Story> { new Story { Id = 1, Title = "Test Story", Url = "http://example.com" } },
-                TotalCount = 1
-            };
-
-            _mockHackerNewsService
-                .Setup(service => service.GetNewestStories(It.IsAny<int>(), It.IsAny<int>()))
-                .ReturnsAsync(expectedModel);
+            var model = new StoryModel { Stories = new List<Story>(), TotalCount = 0 };
+            _mockService.Setup(s => s.GetNewestStories(1, 10, null)).ReturnsAsync(model);
 
             // Act
             var result = await _controller.GetNewestStories(1, 10);
 
             // Assert
-            Assert.IsInstanceOf<OkObjectResult>(result.Result);
-            var okResult = (OkObjectResult)result.Result;
-            var model = okResult.Value as StoryModel;
-            Assert.IsNotNull(model);
-            Assert.AreEqual(expectedModel.TotalCount, model.TotalCount);
+            var notFoundResult = result.Result as NotFoundObjectResult;
+            Assert.IsNotNull(notFoundResult);
+            Assert.AreEqual(404, notFoundResult.StatusCode);
         }
 
         [Test]
-        public async Task SearchStories_ReturnsBadRequest_WhenTermIsEmpty()
+        public async Task GetNewestStories_ValidRequest_ReturnsOk()
         {
             // Arrange
-            string emptyTerm = " ";
-
-            // Act
-            var result = await _controller.SearchStories(emptyTerm);
-
-            // Assert
-            Assert.IsInstanceOf<BadRequestObjectResult>(result.Result);
-            var badRequest = (BadRequestObjectResult)result.Result;
-            Assert.AreEqual("Search term is required.", badRequest.Value);
-        }
-
-        [Test]
-        public async Task SearchStories_ReturnsOkResult_WithStories()
-        {
-            // Arrange
-            var expectedStories = new List<Story>
+            var model = new StoryModel
             {
-                new Story { Id = 1, Title = "Test Search Story", Url = "http://example.com" }
+                Stories = new List<Story> { new Story { Id = 1, Title = "Story", Url = "https://test.com" } },
+                TotalCount = 1
             };
-
-            _mockHackerNewsService
-                .Setup(service => service.SearchStories(It.IsAny<string>()))
-                .ReturnsAsync(expectedStories);
+            _mockService.Setup(s => s.GetNewestStories(1, 10, null)).ReturnsAsync(model);
 
             // Act
-            var result = await _controller.SearchStories("test");
+            var result = await _controller.GetNewestStories(1, 10);
 
             // Assert
-            Assert.IsInstanceOf<OkObjectResult>(result.Result);
-            var okResult = (OkObjectResult)result.Result;
-            var stories = okResult.Value as IEnumerable<Story>;
-            Assert.IsNotNull(stories);
-            Assert.AreEqual(1, ((List<Story>)stories).Count);
+            var okResult = result.Result as OkObjectResult;
+            Assert.IsNotNull(okResult);
+            Assert.AreEqual(200, okResult.StatusCode);
+            Assert.AreSame(model, okResult.Value);
+        }
+
+        [Test]
+        public async Task GetNewestStories_HttpRequestException_ReturnsServiceUnavailable()
+        {
+            // Arrange
+            _mockService
+                .Setup(s => s.GetNewestStories(1, 10, null))
+                .ThrowsAsync(new HttpRequestException("API error"));
+
+            // Act
+            var result = await _controller.GetNewestStories(1, 10);
+
+            // Assert
+            var serviceUnavailableResult = result.Result as ObjectResult;
+            Assert.IsNotNull(serviceUnavailableResult);
+            Assert.AreEqual(503, serviceUnavailableResult.StatusCode);
+        }
+
+        [Test]
+        public async Task GetNewestStories_TimeoutException_ReturnsGatewayTimeout()
+        {
+            // Arrange
+            _mockService
+                .Setup(s => s.GetNewestStories(1, 10, null))
+                .ThrowsAsync(new TimeoutException("Timeout"));
+
+            // Act
+            var result = await _controller.GetNewestStories(1, 10);
+
+            // Assert
+            var timeoutResult = result.Result as ObjectResult;
+            Assert.IsNotNull(timeoutResult);
+            Assert.AreEqual(504, timeoutResult.StatusCode);
+        }
+
+        [Test]
+        public async Task GetNewestStories_UnknownException_ReturnsInternalServerError()
+        {
+            // Arrange
+            _mockService
+                .Setup(s => s.GetNewestStories(1, 10, null))
+                .ThrowsAsync(new Exception("Unknown error"));
+
+            // Act
+            var result = await _controller.GetNewestStories(1, 10);
+
+            // Assert
+            var errorResult = result.Result as ObjectResult;
+            Assert.IsNotNull(errorResult);
+            Assert.AreEqual(500, errorResult.StatusCode);
         }
     }
 }
